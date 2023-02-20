@@ -41,6 +41,11 @@ float read_altitude();
 float read_pressure();
 float read_humidity();
 float read_pressure();
+void write_image();
+void read_image();
+void write_logfile();
+void take_image();
+void send_transmission();
 
 
 // other
@@ -181,6 +186,9 @@ void log() {
  * 
  * Subsections:
  * BME pressure sensor reading
+ * SD card control 
+ * Camera operations
+ * Radio operations
  * 
 */
 
@@ -197,4 +205,25 @@ float read_humidity() { // units %
 }
 float read_temperature() { // units °C
   return pressure_sensor.readTemperature();
+}
+
+// SD card control Functions
+void write_image() {
+
+}
+void read_image() {
+
+}
+void write_logfile() {
+
+}
+
+// Camera control functions
+void take_image() {
+
+}
+
+// Radio control Functions
+void send_transmission() {
+
 }
