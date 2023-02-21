@@ -28,8 +28,15 @@
 
 // Pin Naming
 
-#define Pressure_Sensor_Pin 7 
+#define Pressure_Sensor_Pin   7 
+#define Camera_Pin            6
 
+// // HardWare pins on SAMD21
+// #define SDA   4
+// #define SCL   5
+// #define SCK   8
+// #define MISO  9
+// #define MOSI  10
 
 // All function declarations
 void perception();
