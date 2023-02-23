@@ -188,7 +188,7 @@ void log() {
 
 /*
  * 
- * SECTION 6
+ * SECTION 5
  * Functions for other use
  * 
  * Subsections:

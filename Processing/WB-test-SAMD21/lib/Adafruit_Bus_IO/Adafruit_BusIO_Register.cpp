@@ -1,508 +1,365 @@
-#include "Adafruit_SPIDevice.h"
+#include <Adafruit_BusIO_Register.h>
 
-//#define DEBUG_SERIAL Serial
+#if !defined(SPI_INTERFACES_COUNT) ||                                          \
+    (defined(SPI_INTERFACES_COUNT) && (SPI_INTERFACES_COUNT > 0))
 
 /*!
- *    @brief  Create an SPI device with the given CS pin and settings
- *    @param  cspin The arduino pin number to use for chip select
- *    @param  freq The SPI clock frequency to use, defaults to 1MHz
- *    @param  dataOrder The SPI data order to use for bits within each byte,
- * defaults to SPI_BITORDER_MSBFIRST
- *    @param  dataMode The SPI mode to use, defaults to SPI_MODE0
- *    @param  theSPI The SPI bus to use, defaults to &theSPI
+ *    @brief  Create a register we access over an I2C Device (which defines the
+ * bus and address)
+ *    @param  i2cdevice The I2CDevice to use for underlying I2C access
+ *    @param  reg_addr The address pointer value for the I2C/SMBus register, can
+ * be 8 or 16 bits
+ *    @param  width    The width of the register data itself, defaults to 1 byte
+ *    @param  byteorder The byte order of the register (used when width is > 1),
+ * defaults to LSBFIRST
+ *    @param  address_width The width of the register address itself, defaults
+ * to 1 byte
  */
-Adafruit_SPIDevice::Adafruit_SPIDevice(int8_t cspin, uint32_t freq,
-                                       BusIOBitOrder dataOrder,
-                                       uint8_t dataMode, SPIClass *theSPI) {
-#ifdef BUSIO_HAS_HW_SPI
-  _cs = cspin;
-  _sck = _mosi = _miso = -1;
-  _spi = theSPI;
-  _begun = false;
-  _spiSetting = new SPISettings(freq, dataOrder, dataMode);
-  _freq = freq;
-  _dataOrder = dataOrder;
-  _dataMode = dataMode;
-#else
-  // unused, but needed to suppress compiler warns
-  (void)cspin;
-  (void)freq;
-  (void)dataOrder;
-  (void)dataMode;
-  (void)theSPI;
-#endif
+Adafruit_BusIO_Register::Adafruit_BusIO_Register(Adafruit_I2CDevice *i2cdevice,
+                                                 uint16_t reg_addr,
+                                                 uint8_t width,
+                                                 uint8_t byteorder,
+                                                 uint8_t address_width) {
+  _i2cdevice = i2cdevice;
+  _spidevice = nullptr;
+  _addrwidth = address_width;
+  _address = reg_addr;
+  _byteorder = byteorder;
+  _width = width;
 }
 
 /*!
- *    @brief  Create an SPI device with the given CS pin and settings
- *    @param  cspin The arduino pin number to use for chip select
- *    @param  sckpin The arduino pin number to use for SCK
- *    @param  misopin The arduino pin number to use for MISO, set to -1 if not
- * used
- *    @param  mosipin The arduino pin number to use for MOSI, set to -1 if not
- * used
- *    @param  freq The SPI clock frequency to use, defaults to 1MHz
- *    @param  dataOrder The SPI data order to use for bits within each byte,
- * defaults to SPI_BITORDER_MSBFIRST
- *    @param  dataMode The SPI mode to use, defaults to SPI_MODE0
+ *    @brief  Create a register we access over an SPI Device (which defines the
+ * bus and CS pin)
+ *    @param  spidevice The SPIDevice to use for underlying SPI access
+ *    @param  reg_addr The address pointer value for the SPI register, can
+ * be 8 or 16 bits
+ *    @param  type     The method we use to read/write data to SPI (which is not
+ * as well defined as I2C)
+ *    @param  width    The width of the register data itself, defaults to 1 byte
+ *    @param  byteorder The byte order of the register (used when width is > 1),
+ * defaults to LSBFIRST
+ *    @param  address_width The width of the register address itself, defaults
+ * to 1 byte
  */
-Adafruit_SPIDevice::Adafruit_SPIDevice(int8_t cspin, int8_t sckpin,
-                                       int8_t misopin, int8_t mosipin,
-                                       uint32_t freq, BusIOBitOrder dataOrder,
-                                       uint8_t dataMode) {
-  _cs = cspin;
-  _sck = sckpin;
-  _miso = misopin;
-  _mosi = mosipin;
-
-#ifdef BUSIO_USE_FAST_PINIO
-  csPort = (BusIO_PortReg *)portOutputRegister(digitalPinToPort(cspin));
-  csPinMask = digitalPinToBitMask(cspin);
-  if (mosipin != -1) {
-    mosiPort = (BusIO_PortReg *)portOutputRegister(digitalPinToPort(mosipin));
-    mosiPinMask = digitalPinToBitMask(mosipin);
-  }
-  if (misopin != -1) {
-    misoPort = (BusIO_PortReg *)portInputRegister(digitalPinToPort(misopin));
-    misoPinMask = digitalPinToBitMask(misopin);
-  }
-  clkPort = (BusIO_PortReg *)portOutputRegister(digitalPinToPort(sckpin));
-  clkPinMask = digitalPinToBitMask(sckpin);
-#endif
-
-  _freq = freq;
-  _dataOrder = dataOrder;
-  _dataMode = dataMode;
-  _begun = false;
+Adafruit_BusIO_Register::Adafruit_BusIO_Register(Adafruit_SPIDevice *spidevice,
+                                                 uint16_t reg_addr,
+                                                 Adafruit_BusIO_SPIRegType type,
+                                                 uint8_t width,
+                                                 uint8_t byteorder,
+                                                 uint8_t address_width) {
+  _spidevice = spidevice;
+  _spiregtype = type;
+  _i2cdevice = nullptr;
+  _addrwidth = address_width;
+  _address = reg_addr;
+  _byteorder = byteorder;
+  _width = width;
 }
 
 /*!
- *    @brief  Release memory allocated in constructors
+ *    @brief  Create a register we access over an I2C or SPI Device. This is a
+ * handy function because we can pass in nullptr for the unused interface,
+ * allowing libraries to mass-define all the registers
+ *    @param  i2cdevice The I2CDevice to use for underlying I2C access, if
+ * nullptr we use SPI
+ *    @param  spidevice The SPIDevice to use for underlying SPI access, if
+ * nullptr we use I2C
+ *    @param  reg_addr The address pointer value for the I2C/SMBus/SPI register,
+ * can be 8 or 16 bits
+ *    @param  type     The method we use to read/write data to SPI (which is not
+ * as well defined as I2C)
+ *    @param  width    The width of the register data itself, defaults to 1 byte
+ *    @param  byteorder The byte order of the register (used when width is > 1),
+ * defaults to LSBFIRST
+ *    @param  address_width The width of the register address itself, defaults
+ * to 1 byte
  */
-Adafruit_SPIDevice::~Adafruit_SPIDevice() {
-  if (_spiSetting)
-    delete _spiSetting;
+Adafruit_BusIO_Register::Adafruit_BusIO_Register(
+    Adafruit_I2CDevice *i2cdevice, Adafruit_SPIDevice *spidevice,
+    Adafruit_BusIO_SPIRegType type, uint16_t reg_addr, uint8_t width,
+    uint8_t byteorder, uint8_t address_width) {
+  _spidevice = spidevice;
+  _i2cdevice = i2cdevice;
+  _spiregtype = type;
+  _addrwidth = address_width;
+  _address = reg_addr;
+  _byteorder = byteorder;
+  _width = width;
 }
 
 /*!
- *    @brief  Initializes SPI bus and sets CS pin high
- *    @return Always returns true because there's no way to test success of SPI
- * init
+ *    @brief  Write a buffer of data to the register location
+ *    @param  buffer Pointer to data to write
+ *    @param  len Number of bytes to write
+ *    @return True on successful write (only really useful for I2C as SPI is
+ * uncheckable)
  */
-bool Adafruit_SPIDevice::begin(void) {
-  if (_cs != -1) {
-    pinMode(_cs, OUTPUT);
-    digitalWrite(_cs, HIGH);
+bool Adafruit_BusIO_Register::write(uint8_t *buffer, uint8_t len) {
+
+  uint8_t addrbuffer[2] = {(uint8_t)(_address & 0xFF),
+                           (uint8_t)(_address >> 8)};
+
+  if (_i2cdevice) {
+    return _i2cdevice->write(buffer, len, true, addrbuffer, _addrwidth);
+  }
+  if (_spidevice) {
+    if (_spiregtype == ADDRESSED_OPCODE_BIT0_LOW_TO_WRITE) {
+      // very special case!
+
+      // pass the special opcode address which we set as the high byte of the
+      // regaddr
+      addrbuffer[0] =
+          (uint8_t)(_address >> 8) & ~0x01; // set bottom bit low to write
+      // the 'actual' reg addr is the second byte then
+      addrbuffer[1] = (uint8_t)(_address & 0xFF);
+      // the address appears to be a byte longer
+      return _spidevice->write(buffer, len, addrbuffer, _addrwidth + 1);
+    }
+
+    if (_spiregtype == ADDRBIT8_HIGH_TOREAD) {
+      addrbuffer[0] &= ~0x80;
+    }
+    if (_spiregtype == ADDRBIT8_HIGH_TOWRITE) {
+      addrbuffer[0] |= 0x80;
+    }
+    if (_spiregtype == AD8_HIGH_TOREAD_AD7_HIGH_TOINC) {
+      addrbuffer[0] &= ~0x80;
+      addrbuffer[0] |= 0x40;
+    }
+    return _spidevice->write(buffer, len, addrbuffer, _addrwidth);
+  }
+  return false;
+}
+
+/*!
+ *    @brief  Write up to 4 bytes of data to the register location
+ *    @param  value Data to write
+ *    @param  numbytes How many bytes from 'value' to write
+ *    @return True on successful write (only really useful for I2C as SPI is
+ * uncheckable)
+ */
+bool Adafruit_BusIO_Register::write(uint32_t value, uint8_t numbytes) {
+  if (numbytes == 0) {
+    numbytes = _width;
+  }
+  if (numbytes > 4) {
+    return false;
   }
 
-  if (_spi) { // hardware SPI
-#ifdef BUSIO_HAS_HW_SPI
-    _spi->begin();
-#endif
-  } else {
-    pinMode(_sck, OUTPUT);
+  // store a copy
+  _cached = value;
 
-    if ((_dataMode == SPI_MODE0) || (_dataMode == SPI_MODE1)) {
-      // idle low on mode 0 and 1
-      digitalWrite(_sck, LOW);
+  for (int i = 0; i < numbytes; i++) {
+    if (_byteorder == LSBFIRST) {
+      _buffer[i] = value & 0xFF;
     } else {
-      // idle high on mode 2 or 3
-      digitalWrite(_sck, HIGH);
+      _buffer[numbytes - i - 1] = value & 0xFF;
     }
-    if (_mosi != -1) {
-      pinMode(_mosi, OUTPUT);
-      digitalWrite(_mosi, HIGH);
-    }
-    if (_miso != -1) {
-      pinMode(_miso, INPUT);
-    }
+    value >>= 8;
   }
-
-  _begun = true;
-  return true;
+  return write(_buffer, numbytes);
 }
 
 /*!
- *    @brief  Transfer (send/receive) a buffer over hard/soft SPI, without
- * transaction management
- *    @param  buffer The buffer to send and receive at the same time
- *    @param  len    The number of bytes to transfer
+ *    @brief  Read data from the register location. This does not do any error
+ * checking!
+ *    @return Returns 0xFFFFFFFF on failure, value otherwise
  */
-void Adafruit_SPIDevice::transfer(uint8_t *buffer, size_t len) {
-  //
-  // HARDWARE SPI
-  //
-  if (_spi) {
-#ifdef BUSIO_HAS_HW_SPI
-#if defined(SPARK)
-    _spi->transfer(buffer, buffer, len, nullptr);
-#elif defined(STM32)
-    for (size_t i = 0; i < len; i++) {
-      _spi->transfer(buffer[i]);
-    }
-#else
-    _spi->transfer(buffer, len);
-#endif
-    return;
-#endif
+uint32_t Adafruit_BusIO_Register::read(void) {
+  if (!read(_buffer, _width)) {
+    return -1;
   }
 
-  //
-  // SOFTWARE SPI
-  //
-  uint8_t startbit;
-  if (_dataOrder == SPI_BITORDER_LSBFIRST) {
-    startbit = 0x1;
+  uint32_t value = 0;
+
+  for (int i = 0; i < _width; i++) {
+    value <<= 8;
+    if (_byteorder == LSBFIRST) {
+      value |= _buffer[_width - i - 1];
+    } else {
+      value |= _buffer[i];
+    }
+  }
+
+  return value;
+}
+
+/*!
+ *    @brief  Read cached data from last time we wrote to this register
+ *    @return Returns 0xFFFFFFFF on failure, value otherwise
+ */
+uint32_t Adafruit_BusIO_Register::readCached(void) { return _cached; }
+
+/*!
+ *    @brief  Read a buffer of data from the register location
+ *    @param  buffer Pointer to data to read into
+ *    @param  len Number of bytes to read
+ *    @return True on successful write (only really useful for I2C as SPI is
+ * uncheckable)
+ */
+bool Adafruit_BusIO_Register::read(uint8_t *buffer, uint8_t len) {
+  uint8_t addrbuffer[2] = {(uint8_t)(_address & 0xFF),
+                           (uint8_t)(_address >> 8)};
+
+  if (_i2cdevice) {
+    return _i2cdevice->write_then_read(addrbuffer, _addrwidth, buffer, len);
+  }
+  if (_spidevice) {
+    if (_spiregtype == ADDRESSED_OPCODE_BIT0_LOW_TO_WRITE) {
+      // very special case!
+
+      // pass the special opcode address which we set as the high byte of the
+      // regaddr
+      addrbuffer[0] =
+          (uint8_t)(_address >> 8) | 0x01; // set bottom bit high to read
+      // the 'actual' reg addr is the second byte then
+      addrbuffer[1] = (uint8_t)(_address & 0xFF);
+      // the address appears to be a byte longer
+      return _spidevice->write_then_read(addrbuffer, _addrwidth + 1, buffer,
+                                         len);
+    }
+    if (_spiregtype == ADDRBIT8_HIGH_TOREAD) {
+      addrbuffer[0] |= 0x80;
+    }
+    if (_spiregtype == ADDRBIT8_HIGH_TOWRITE) {
+      addrbuffer[0] &= ~0x80;
+    }
+    if (_spiregtype == AD8_HIGH_TOREAD_AD7_HIGH_TOINC) {
+      addrbuffer[0] |= 0x80 | 0x40;
+    }
+    return _spidevice->write_then_read(addrbuffer, _addrwidth, buffer, len);
+  }
+  return false;
+}
+
+/*!
+ *    @brief  Read 2 bytes of data from the register location
+ *    @param  value Pointer to uint16_t variable to read into
+ *    @return True on successful write (only really useful for I2C as SPI is
+ * uncheckable)
+ */
+bool Adafruit_BusIO_Register::read(uint16_t *value) {
+  if (!read(_buffer, 2)) {
+    return false;
+  }
+
+  if (_byteorder == LSBFIRST) {
+    *value = _buffer[1];
+    *value <<= 8;
+    *value |= _buffer[0];
   } else {
-    startbit = 0x80;
+    *value = _buffer[0];
+    *value <<= 8;
+    *value |= _buffer[1];
   }
-
-  bool towrite, lastmosi = !(buffer[0] & startbit);
-  uint8_t bitdelay_us = (1000000 / _freq) / 2;
-
-  for (size_t i = 0; i < len; i++) {
-    uint8_t reply = 0;
-    uint8_t send = buffer[i];
-
-    /*
-    Serial.print("\tSending software SPI byte 0x");
-    Serial.print(send, HEX);
-    Serial.print(" -> 0x");
-    */
-
-    // Serial.print(send, HEX);
-    for (uint8_t b = startbit; b != 0;
-         b = (_dataOrder == SPI_BITORDER_LSBFIRST) ? b << 1 : b >> 1) {
-
-      if (bitdelay_us) {
-        delayMicroseconds(bitdelay_us);
-      }
-
-      if (_dataMode == SPI_MODE0 || _dataMode == SPI_MODE2) {
-        towrite = send & b;
-        if ((_mosi != -1) && (lastmosi != towrite)) {
-#ifdef BUSIO_USE_FAST_PINIO
-          if (towrite)
-            *mosiPort |= mosiPinMask;
-          else
-            *mosiPort &= ~mosiPinMask;
-#else
-          digitalWrite(_mosi, towrite);
-#endif
-          lastmosi = towrite;
-        }
-
-#ifdef BUSIO_USE_FAST_PINIO
-        *clkPort |= clkPinMask; // Clock high
-#else
-        digitalWrite(_sck, HIGH);
-#endif
-
-        if (bitdelay_us) {
-          delayMicroseconds(bitdelay_us);
-        }
-
-        if (_miso != -1) {
-#ifdef BUSIO_USE_FAST_PINIO
-          if (*misoPort & misoPinMask) {
-#else
-          if (digitalRead(_miso)) {
-#endif
-            reply |= b;
-          }
-        }
-
-#ifdef BUSIO_USE_FAST_PINIO
-        *clkPort &= ~clkPinMask; // Clock low
-#else
-        digitalWrite(_sck, LOW);
-#endif
-      } else { // if (_dataMode == SPI_MODE1 || _dataMode == SPI_MODE3)
-
-#ifdef BUSIO_USE_FAST_PINIO
-        *clkPort |= clkPinMask; // Clock high
-#else
-        digitalWrite(_sck, HIGH);
-#endif
-
-        if (bitdelay_us) {
-          delayMicroseconds(bitdelay_us);
-        }
-
-        if (_mosi != -1) {
-#ifdef BUSIO_USE_FAST_PINIO
-          if (send & b)
-            *mosiPort |= mosiPinMask;
-          else
-            *mosiPort &= ~mosiPinMask;
-#else
-          digitalWrite(_mosi, send & b);
-#endif
-        }
-
-#ifdef BUSIO_USE_FAST_PINIO
-        *clkPort &= ~clkPinMask; // Clock low
-#else
-        digitalWrite(_sck, LOW);
-#endif
-
-        if (_miso != -1) {
-#ifdef BUSIO_USE_FAST_PINIO
-          if (*misoPort & misoPinMask) {
-#else
-          if (digitalRead(_miso)) {
-#endif
-            reply |= b;
-          }
-        }
-      }
-      if (_miso != -1) {
-        buffer[i] = reply;
-      }
-    }
-  }
-  return;
-}
-
-/*!
- *    @brief  Transfer (send/receive) one byte over hard/soft SPI, without
- * transaction management
- *    @param  send The byte to send
- *    @return The byte received while transmitting
- */
-uint8_t Adafruit_SPIDevice::transfer(uint8_t send) {
-  uint8_t data = send;
-  transfer(&data, 1);
-  return data;
-}
-
-/*!
- *    @brief  Manually begin a transaction (calls beginTransaction if hardware
- * SPI)
- */
-void Adafruit_SPIDevice::beginTransaction(void) {
-  if (_spi) {
-#ifdef BUSIO_HAS_HW_SPI
-    _spi->beginTransaction(*_spiSetting);
-#endif
-  }
-}
-
-/*!
- *    @brief  Manually end a transaction (calls endTransaction if hardware SPI)
- */
-void Adafruit_SPIDevice::endTransaction(void) {
-  if (_spi) {
-#ifdef BUSIO_HAS_HW_SPI
-    _spi->endTransaction();
-#endif
-  }
-}
-
-/*!
- *    @brief  Assert/Deassert the CS pin if it is defined
- *    @param  value The state the CS is set to
- */
-void Adafruit_SPIDevice::setChipSelect(int value) {
-  if (_cs != -1) {
-    digitalWrite(_cs, value);
-  }
-}
-
-/*!
- *    @brief  Write a buffer or two to the SPI device, with transaction
- * management.
- *    @brief  Manually begin a transaction (calls beginTransaction if hardware
- *            SPI) with asserting the CS pin
- */
-void Adafruit_SPIDevice::beginTransactionWithAssertingCS() {
-  beginTransaction();
-  setChipSelect(LOW);
-}
-
-/*!
- *    @brief  Manually end a transaction (calls endTransaction if hardware SPI)
- *            with deasserting the CS pin
- */
-void Adafruit_SPIDevice::endTransactionWithDeassertingCS() {
-  setChipSelect(HIGH);
-  endTransaction();
-}
-
-/*!
- *    @brief  Write a buffer or two to the SPI device, with transaction
- * management.
- *    @param  buffer Pointer to buffer of data to write
- *    @param  len Number of bytes from buffer to write
- *    @param  prefix_buffer Pointer to optional array of data to write before
- * buffer.
- *    @param  prefix_len Number of bytes from prefix buffer to write
- *    @return Always returns true because there's no way to test success of SPI
- * writes
- */
-bool Adafruit_SPIDevice::write(const uint8_t *buffer, size_t len,
-                               const uint8_t *prefix_buffer,
-                               size_t prefix_len) {
-  beginTransactionWithAssertingCS();
-
-  // do the writing
-#if defined(ARDUINO_ARCH_ESP32)
-  if (_spi) {
-    if (prefix_len > 0) {
-      _spi->transferBytes(prefix_buffer, nullptr, prefix_len);
-    }
-    if (len > 0) {
-      _spi->transferBytes(buffer, nullptr, len);
-    }
-  } else
-#endif
-  {
-    for (size_t i = 0; i < prefix_len; i++) {
-      transfer(prefix_buffer[i]);
-    }
-    for (size_t i = 0; i < len; i++) {
-      transfer(buffer[i]);
-    }
-  }
-  endTransactionWithDeassertingCS();
-
-#ifdef DEBUG_SERIAL
-  DEBUG_SERIAL.print(F("\tSPIDevice Wrote: "));
-  if ((prefix_len != 0) && (prefix_buffer != nullptr)) {
-    for (uint16_t i = 0; i < prefix_len; i++) {
-      DEBUG_SERIAL.print(F("0x"));
-      DEBUG_SERIAL.print(prefix_buffer[i], HEX);
-      DEBUG_SERIAL.print(F(", "));
-    }
-  }
-  for (uint16_t i = 0; i < len; i++) {
-    DEBUG_SERIAL.print(F("0x"));
-    DEBUG_SERIAL.print(buffer[i], HEX);
-    DEBUG_SERIAL.print(F(", "));
-    if (i % 32 == 31) {
-      DEBUG_SERIAL.println();
-    }
-  }
-  DEBUG_SERIAL.println();
-#endif
-
   return true;
 }
 
 /*!
- *    @brief  Read from SPI into a buffer from the SPI device, with transaction
- * management.
- *    @param  buffer Pointer to buffer of data to read into
- *    @param  len Number of bytes from buffer to read.
- *    @param  sendvalue The 8-bits of data to write when doing the data read,
- * defaults to 0xFF
- *    @return Always returns true because there's no way to test success of SPI
- * writes
+ *    @brief  Read 1 byte of data from the register location
+ *    @param  value Pointer to uint8_t variable to read into
+ *    @return True on successful write (only really useful for I2C as SPI is
+ * uncheckable)
  */
-bool Adafruit_SPIDevice::read(uint8_t *buffer, size_t len, uint8_t sendvalue) {
-  memset(buffer, sendvalue, len); // clear out existing buffer
-
-  beginTransactionWithAssertingCS();
-  transfer(buffer, len);
-  endTransactionWithDeassertingCS();
-
-#ifdef DEBUG_SERIAL
-  DEBUG_SERIAL.print(F("\tSPIDevice Read: "));
-  for (uint16_t i = 0; i < len; i++) {
-    DEBUG_SERIAL.print(F("0x"));
-    DEBUG_SERIAL.print(buffer[i], HEX);
-    DEBUG_SERIAL.print(F(", "));
-    if (len % 32 == 31) {
-      DEBUG_SERIAL.println();
-    }
+bool Adafruit_BusIO_Register::read(uint8_t *value) {
+  if (!read(_buffer, 1)) {
+    return false;
   }
-  DEBUG_SERIAL.println();
-#endif
 
+  *value = _buffer[0];
   return true;
 }
 
 /*!
- *    @brief  Write some data, then read some data from SPI into another buffer,
- * with transaction management. The buffers can point to same/overlapping
- * locations. This does not transmit-receive at the same time!
- *    @param  write_buffer Pointer to buffer of data to write from
- *    @param  write_len Number of bytes from buffer to write.
- *    @param  read_buffer Pointer to buffer of data to read into.
- *    @param  read_len Number of bytes from buffer to read.
- *    @param  sendvalue The 8-bits of data to write when doing the data read,
- * defaults to 0xFF
- *    @return Always returns true because there's no way to test success of SPI
- * writes
+ *    @brief  Pretty printer for this register
+ *    @param  s The Stream to print to, defaults to &Serial
  */
-bool Adafruit_SPIDevice::write_then_read(const uint8_t *write_buffer,
-                                         size_t write_len, uint8_t *read_buffer,
-                                         size_t read_len, uint8_t sendvalue) {
-  beginTransactionWithAssertingCS();
-  // do the writing
-#if defined(ARDUINO_ARCH_ESP32)
-  if (_spi) {
-    if (write_len > 0) {
-      _spi->transferBytes(write_buffer, nullptr, write_len);
-    }
-  } else
-#endif
-  {
-    for (size_t i = 0; i < write_len; i++) {
-      transfer(write_buffer[i]);
-    }
-  }
-
-#ifdef DEBUG_SERIAL
-  DEBUG_SERIAL.print(F("\tSPIDevice Wrote: "));
-  for (uint16_t i = 0; i < write_len; i++) {
-    DEBUG_SERIAL.print(F("0x"));
-    DEBUG_SERIAL.print(write_buffer[i], HEX);
-    DEBUG_SERIAL.print(F(", "));
-    if (write_len % 32 == 31) {
-      DEBUG_SERIAL.println();
-    }
-  }
-  DEBUG_SERIAL.println();
-#endif
-
-  // do the reading
-  for (size_t i = 0; i < read_len; i++) {
-    read_buffer[i] = transfer(sendvalue);
-  }
-
-#ifdef DEBUG_SERIAL
-  DEBUG_SERIAL.print(F("\tSPIDevice Read: "));
-  for (uint16_t i = 0; i < read_len; i++) {
-    DEBUG_SERIAL.print(F("0x"));
-    DEBUG_SERIAL.print(read_buffer[i], HEX);
-    DEBUG_SERIAL.print(F(", "));
-    if (read_len % 32 == 31) {
-      DEBUG_SERIAL.println();
-    }
-  }
-  DEBUG_SERIAL.println();
-#endif
-
-  endTransactionWithDeassertingCS();
-
-  return true;
+void Adafruit_BusIO_Register::print(Stream *s) {
+  uint32_t val = read();
+  s->print("0x");
+  s->print(val, HEX);
 }
 
 /*!
- *    @brief  Write some data and read some data at the same time from SPI
- * into the same buffer, with transaction management. This is basicaly a wrapper
- * for transfer() with CS-pin and transaction management. This /does/
- * transmit-receive at the same time!
- *    @param  buffer Pointer to buffer of data to write/read to/from
- *    @param  len Number of bytes from buffer to write/read.
- *    @return Always returns true because there's no way to test success of SPI
- * writes
+ *    @brief  Pretty printer for this register
+ *    @param  s The Stream to print to, defaults to &Serial
  */
-bool Adafruit_SPIDevice::write_and_read(uint8_t *buffer, size_t len) {
-  beginTransactionWithAssertingCS();
-  transfer(buffer, len);
-  endTransactionWithDeassertingCS();
-
-  return true;
+void Adafruit_BusIO_Register::println(Stream *s) {
+  print(s);
+  s->println();
 }
+
+/*!
+ *    @brief  Create a slice of the register that we can address without
+ * touching other bits
+ *    @param  reg The Adafruit_BusIO_Register which defines the bus/register
+ *    @param  bits The number of bits wide we are slicing
+ *    @param  shift The number of bits that our bit-slice is shifted from LSB
+ */
+Adafruit_BusIO_RegisterBits::Adafruit_BusIO_RegisterBits(
+    Adafruit_BusIO_Register *reg, uint8_t bits, uint8_t shift) {
+  _register = reg;
+  _bits = bits;
+  _shift = shift;
+}
+
+/*!
+ *    @brief  Read 4 bytes of data from the register
+ *    @return  data The 4 bytes to read
+ */
+uint32_t Adafruit_BusIO_RegisterBits::read(void) {
+  uint32_t val = _register->read();
+  val >>= _shift;
+  return val & ((1 << (_bits)) - 1);
+}
+
+/*!
+ *    @brief  Write 4 bytes of data to the register
+ *    @param  data The 4 bytes to write
+ *    @return True on successful write (only really useful for I2C as SPI is
+ * uncheckable)
+ */
+bool Adafruit_BusIO_RegisterBits::write(uint32_t data) {
+  uint32_t val = _register->read();
+
+  // mask off the data before writing
+  uint32_t mask = (1 << (_bits)) - 1;
+  data &= mask;
+
+  mask <<= _shift;
+  val &= ~mask;          // remove the current data at that spot
+  val |= data << _shift; // and add in the new data
+
+  return _register->write(val, _register->width());
+}
+
+/*!
+ *    @brief  The width of the register data, helpful for doing calculations
+ *    @returns The data width used when initializing the register
+ */
+uint8_t Adafruit_BusIO_Register::width(void) { return _width; }
+
+/*!
+ *    @brief  Set the default width of data
+ *    @param width the default width of data read from register
+ */
+void Adafruit_BusIO_Register::setWidth(uint8_t width) { _width = width; }
+
+/*!
+ *    @brief  Set register address
+ *    @param address the address from register
+ */
+void Adafruit_BusIO_Register::setAddress(uint16_t address) {
+  _address = address;
+}
+
+/*!
+ *    @brief  Set the width of register address
+ *    @param address_width the width for register address
+ */
+void Adafruit_BusIO_Register::setAddressWidth(uint16_t address_width) {
+  _addrwidth = address_width;
+}
+
+#endif // SPI exists

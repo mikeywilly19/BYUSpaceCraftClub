@@ -1,8 +1,10 @@
-# Adafruit Bus IO Library [![Build Status](https://github.com/adafruit/Adafruit_BusIO/workflows/Arduino%20Library%20CI/badge.svg)](https://github.com/adafruit/Adafruit_BusIO/actions)
+#ifndef _ADAFRUIT_I2C_REGISTER_H_
+#define _ADAFRUIT_I2C_REGISTER_H_
 
+#include <Adafruit_BusIO_Register.h>
+#include <Arduino.h>
 
-This is a helper library to abstract away I2C & SPI transactions and registers
+typedef Adafruit_BusIO_Register Adafruit_I2CRegister;
+typedef Adafruit_BusIO_RegisterBits Adafruit_I2CRegisterBits;
 
-Adafruit invests time and resources providing this open source code, please support Adafruit and open-source hardware by purchasing products from Adafruit!
-
-MIT license, all text above must be included in any redistribution
+#endif
