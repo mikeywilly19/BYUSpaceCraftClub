@@ -32,7 +32,7 @@ void setup() {
 
   Serial.print("Initializing SD card...");
 
-  if (!SD.begin(4)) {
+  if (!SD.begin(2)) {
     Serial.println("initialization failed!");
     while (1);
   }
@@ -57,8 +57,8 @@ void setup() {
   }
 
   // delete the file:
-  // Serial.println("Removing example.txt...");
-  // SD.remove("example.txt");
+  Serial.println("Removing example.txt...");
+  SD.remove("example.txt");
 
   if (SD.exists("example.txt")) {
     Serial.println("example.txt exists.");

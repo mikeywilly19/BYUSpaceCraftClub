@@ -25,7 +25,7 @@ const char bmp_header[BMPIMAGEOFFSET] PROGMEM =
   0x00, 0x00
 };
 // set pin 7 as the slave select for the digital pot:
-const int CS = 6;
+const int CS = 1;
 bool is_header = false;
 int mode = 0;
 uint8_t start_capture = 0;

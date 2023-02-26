@@ -28,8 +28,9 @@
 
 // Pin Naming
 
-#define Pressure_Sensor_Pin   7 
-#define Camera_Pin            6
+#define Pressure_Sensor_Pin   3
+#define SD_Card_Pin           2
+#define Camera_Pin            1
 
 // // HardWare pins on SAMD21
 // #define SDA   4
