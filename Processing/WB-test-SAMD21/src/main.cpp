@@ -16,6 +16,7 @@
 #include <SPI.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#include <SD.h>
 
 
 
@@ -28,8 +29,8 @@
 
 // Pin Naming
 
-#define Pressure_Sensor_Pin   3
-#define SD_Card_Pin           2
+#define Pressure_Sensor_Pin   6
+#define SD_Card_Pin           7
 #define Camera_Pin            1
 
 // // HardWare pins on SAMD21
@@ -51,7 +52,7 @@ float read_humidity();
 float read_pressure();
 void write_image();
 void read_image();
-void write_logfile();
+void write_logfile(String message);
 void take_image();
 void send_transmission();
 
@@ -59,6 +60,7 @@ void send_transmission();
 // other
 
 Adafruit_BME280 pressure_sensor(Pressure_Sensor_Pin); // Object for pressure sensor
+File logfile;
 
 
 void setup() {
@@ -66,11 +68,11 @@ void setup() {
 
   // Serial Setup
   Serial.begin(9600);
+  SD.begin(SD_Card_Pin);
 
 
   // Pressure sensor setup
   pressure_sensor.begin();  
-  digitalWrite(6, LOW);
 
 }
 
@@ -102,11 +104,9 @@ void loop() {
 */
 void perception() {
   if(reachedAltitude()) {
-    Serial.println("Altitude reached");
-    digitalWrite(6, HIGH);
+    write_logfile("Altitude reached");
   } else {
-    Serial.println("Altitude not reached");
-    digitalWrite(6, LOW);
+    write_logfile("Altitude not reached");
   }
 }
 
@@ -129,7 +129,7 @@ bool reachedAltitude() {
   * 
 */
 void planning() {
-  Serial.print("Current Altitude = ");
+  write_logfile("Current Altitude = ");
 }
 
 
@@ -151,7 +151,8 @@ void planning() {
 * 
 */
 void action() {
-  Serial.println(read_altitude());
+  float alt = read_altitude();
+  write_logfile(String(alt));
 }
 
 // add fucntion to run camera capture
@@ -173,7 +174,7 @@ void action() {
  * 
 */
 void log() {
-  delay(5000);
+  delay(2000);
 
 }
 
@@ -222,8 +223,17 @@ void write_image() {
 void read_image() {
 
 }
-void write_logfile() {
+void write_logfile(String message) {
+  logfile = SD.open("logfile.txt", FILE_WRITE);
 
+   if (logfile) {
+    logfile.println(message);
+    logfile.close();
+  }
+  // if the file isn't open, pop up an error:
+  else {
+    Serial.println("error opening logfile.txt");
+  }
 }
 
 // Camera control functions
