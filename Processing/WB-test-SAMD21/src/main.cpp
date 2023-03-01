@@ -17,6 +17,8 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <SD.h>
+#include <ArduCAM.h>
+#include "memorysaver.h"
 
 
 
@@ -30,7 +32,7 @@
 // Pin Naming
 
 #define Pressure_Sensor_Pin   6
-#define SD_Card_Pin           7
+#define SD_Card_Pin           2
 #define Camera_Pin            1
 
 // // HardWare pins on SAMD21
@@ -55,24 +57,47 @@ void read_image();
 void write_logfile(String message);
 void take_image();
 void send_transmission();
+void init_camera();
+void write_new_captures();
 
 
 // other
 
 Adafruit_BME280 pressure_sensor(Pressure_Sensor_Pin); // Object for pressure sensor
+ArduCAM myCAM( OV2640, Camera_Pin ); // Camera
 File logfile;
 
 
 void setup() {
   // add all setup commands here
 
+  delay(5000);
+
   // Serial Setup
   Serial.begin(9600);
+
+  pinMode(Camera_Pin, OUTPUT); // setup the camera chip select
+  digitalWrite(Camera_Pin, HIGH); // disable camera
+
+  pinMode(SD_Card_Pin, OUTPUT); // setup the SD Card chip select
+  digitalWrite(SD_Card_Pin, HIGH); // disable SD Card
+
+  Wire.begin();
+  SPI.begin();
+
+  init_camera();
+
   SD.begin(SD_Card_Pin);
+
+  //initalize camera
+
 
 
   // Pressure sensor setup
-  pressure_sensor.begin();  
+  //pressure_sensor.begin();  
+
+  //take an image
+  take_image();
 
 }
 
@@ -81,10 +106,11 @@ void loop() {
   //      Also included a log function for logging events, 
   //      could be done interspersed through the program instead
 
-  perception();
-  planning();
-  action();
-  log();
+  //perception();
+  //planning();
+  //action();
+  //log();
+  write_new_captures();
 
 
   // test only section:
@@ -234,14 +260,78 @@ void write_logfile(String message) {
   else {
     Serial.println("error opening logfile.txt");
   }
+  Serial.println(message);
 }
 
 // Camera control functions
 void take_image() {
+  //clear flags
+  myCAM.flush_fifo();
+  myCAM.clear_fifo_flag();
+  //start flags
+  write_logfile("Starting Camera Capture");
+  myCAM.start_capture();
 
+}
+
+void write_new_captures(){
+  File outfile = SD.open("test_image.jpeg", FILE_WRITE);
+  if(!myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) return; // camera not done yet
+  write_logfile("Image Capture Ready");
+  uint32_t length = myCAM.read_fifo_length(); //read image length
+  myCAM.set_fifo_burst(); //Set fifo burst mode for easy reads
+  uint8_t data;
+  while(length > 0){
+    myCAM.CS_LOW(); // active the camera
+    data = SPI.transfer(0x00);
+    myCAM.CS_HIGH(); // deactive the camera for sd?
+    outfile.write(data);
+  }
+  write_logfile("Finished Image Write");
 }
 
 // Radio control Functions
 void send_transmission() {
 
+}
+
+//initalize camera
+void init_camera(){
+  //reset camera
+  myCAM.write_reg(0x07, 0x80);
+  delay(100);
+  myCAM.write_reg(0x07, 0x00);
+  //check test register
+  while(1){ // just writes to a test port and if it can read it back then it is good
+    //Check if the ArduCAM SPI bus is OK
+    myCAM.write_reg(ARDUCHIP_TEST1, 0x55);
+    uint8_t temp = myCAM.read_reg(ARDUCHIP_TEST1);
+    if (temp != 0x55){
+      write_logfile("Failed to connect to Camera via SPI");
+      delay(10000);
+      continue; // retry untill good connection
+    }else{
+      write_logfile("Succesfully connected to Camera modual via SPI");
+      break;   // good connection continue with the code
+    }
+  }
+  //check the camera type
+  uint8_t vid, pid;
+  while(1){
+    //Check if the camera module type is OV2640
+    myCAM.wrSensorReg8_8(0xff, 0x01);
+    myCAM.rdSensorReg8_8(OV2640_CHIPID_HIGH, &vid);
+    myCAM.rdSensorReg8_8(OV2640_CHIPID_LOW, &pid);
+    if ((vid != 0x26 ) && (( pid != 0x41 ) || ( pid != 0x42 ))){
+      write_logfile("Failed to find the Correct Camera Modual");
+      delay(1000);
+      continue;
+    }else{
+      break;
+    } 
+  }
+  //setup camera settings
+  myCAM.set_format(JPEG);
+  myCAM.InitCAM();
+  myCAM.OV2640_set_JPEG_size(OV2640_320x240);
 }
