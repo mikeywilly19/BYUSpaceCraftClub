@@ -234,6 +234,7 @@ void write_logfile(String message) {
   else {
     Serial.println("error opening logfile.txt");
   }
+  Serial.println(message);
 }
 
 // Camera control functions
