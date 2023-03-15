@@ -31,9 +31,9 @@
 
 // Pin Naming
 
-#define Pressure_Sensor_Pin   6
-#define SD_Card_Pin           2
-#define Camera_Pin            1
+#define Pressure_Sensor_Pin   2
+#define SD_Card_Pin           1
+#define Camera_Pin            3
 
 // // HardWare pins on SAMD21
 // #define SDA   4
@@ -71,30 +71,23 @@ File logfile;
 void setup() {
   // add all setup commands here
 
-  delay(5000);
-
   // Serial Setup
   Serial.begin(9600);
+  if(!SD.begin(SD_Card_Pin)){
+    Serial.println("Failed to Initalize SD Card");
+  }
+
 
   pinMode(Camera_Pin, OUTPUT); // setup the camera chip select
   digitalWrite(Camera_Pin, HIGH); // disable camera
-
-  pinMode(SD_Card_Pin, OUTPUT); // setup the SD Card chip select
-  digitalWrite(SD_Card_Pin, HIGH); // disable SD Card
 
   Wire.begin();
   SPI.begin();
 
   init_camera();
 
-  SD.begin(SD_Card_Pin);
-
-  //initalize camera
-
-
-
   // Pressure sensor setup
-  //pressure_sensor.begin();  
+  pressure_sensor.begin();  
 
   //take an image
   take_image();
@@ -252,7 +245,7 @@ void read_image() {
 void write_logfile(String message) {
   logfile = SD.open("logfile.txt", FILE_WRITE);
 
-   if (logfile) {
+  if (logfile) {
     logfile.println(message);
     logfile.close();
   }
@@ -275,19 +268,30 @@ void take_image() {
 }
 
 void write_new_captures(){
-  File outfile = SD.open("test_image.jpeg", FILE_WRITE);
   if(!myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) return; // camera not done yet
+  File outfile = SD.open("IMAGE.jpg", O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
+  if(!outfile){
+    write_logfile("Failed to crate image file");
+    return;
+  }
   write_logfile("Image Capture Ready");
   uint32_t length = myCAM.read_fifo_length(); //read image length
   myCAM.set_fifo_burst(); //Set fifo burst mode for easy reads
   uint8_t data;
   while(length > 0){
     myCAM.CS_LOW(); // active the camera
+    myCAM.set_fifo_burst(); // has to be reset as far a I know every time
     data = SPI.transfer(0x00);
-    myCAM.CS_HIGH(); // deactive the camera for sd?
+    myCAM.CS_HIGH(); // deactive the camera for sd
     outfile.write(data);
+    length--;
   }
   write_logfile("Finished Image Write");
+  myCAM.clear_fifo_flag();
+  outfile.close();
+  if(!SD.exists("IMAGE.jpg")){
+    write_logfile("Created Image file and wrote to it but it donst exist after writing");
+  }
 }
 
 // Radio control Functions
