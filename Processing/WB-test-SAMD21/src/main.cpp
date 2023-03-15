@@ -29,9 +29,9 @@
 
 // Pin Naming
 
-#define Pressure_Sensor_Pin   6
-#define SD_Card_Pin           7
-#define Camera_Pin            1
+#define Pressure_Sensor_Pin   2
+#define SD_Card_Pin           1
+#define Camera_Pin            3
 
 // // HardWare pins on SAMD21
 // #define SDA   4
@@ -73,6 +73,34 @@ void setup() {
 
   // Pressure sensor setup
   pressure_sensor.begin();  
+
+
+  pinMode(1, OUTPUT);
+  digitalWrite(0, HIGH);
+
+  // while(true) {
+  //   digitalWrite(1, HIGH);
+  //   delay(50);
+  //   digitalWrite(1, LOW);
+  //   delay(50);
+  // }
+
+  
+
+
+  // pinMode(2, OUTPUT);
+  // digitalWrite(2, HIGH);
+  
+
+
+  // pinMode(1, OUTPUT);
+  // digitalWrite(1, HIGH);
+  
+
+
+
+  // pinMode(3, OUTPUT);
+  // digitalWrite(3, HIGH);
 
 }
 
@@ -239,7 +267,7 @@ void write_logfile(String message) {
 
 // Camera control functions
 void take_image() {
-
+  
 }
 
 // Radio control Functions
