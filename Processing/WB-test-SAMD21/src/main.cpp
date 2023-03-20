@@ -17,7 +17,8 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <SD.h>
-
+#include <ArduCAM.h>
+// #include "memorysaver.h"
 
 
 // Global constants
@@ -55,11 +56,14 @@ void read_image();
 void write_logfile(String message);
 void take_image();
 void send_transmission();
+void init_camera();
+void write_new_captures();
 
 
 // other
 
 Adafruit_BME280 pressure_sensor(Pressure_Sensor_Pin); // Object for pressure sensor
+ArduCAM myCAM( OV2640, Camera_Pin ); // Camera
 File logfile;
 
 
@@ -68,40 +72,36 @@ void setup() {
 
   // Serial Setup
   Serial.begin(9600);
-  SD.begin(SD_Card_Pin);
+  Wire.begin();
+  SPI.begin();
 
+
+  // SD card setup
+  pinMode(SD_Card_Pin, OUTPUT); // setup the camera chip select
+  digitalWrite(SD_Card_Pin, HIGH); // disable camera
+
+  if(!SD.begin(SD_Card_Pin)){
+    Serial.println("Failed to Initalize SD Card");
+  }
+
+
+  // Camera Setup
+  pinMode(Camera_Pin, OUTPUT); // setup the camera chip select
+  digitalWrite(Camera_Pin, HIGH); // disable camera
+
+  Wire.begin();
+  SPI.begin();
+
+  init_camera();
 
   // Pressure sensor setup
-  pressure_sensor.begin();  
+  pinMode(Pressure_Sensor_Pin, OUTPUT); // setup the BME chip select
+  digitalWrite(Camera_Pin, HIGH);  // disable pressure sensor
 
+  pressure_sensor.begin();
 
-  pinMode(1, OUTPUT);
-  digitalWrite(0, HIGH);
-
-  // while(true) {
-  //   digitalWrite(1, HIGH);
-  //   delay(50);
-  //   digitalWrite(1, LOW);
-  //   delay(50);
-  // }
-
-  
-
-
-  // pinMode(2, OUTPUT);
-  // digitalWrite(2, HIGH);
-  
-
-
-  // pinMode(1, OUTPUT);
-  // digitalWrite(1, HIGH);
-  
-
-
-
-  // pinMode(3, OUTPUT);
-  // digitalWrite(3, HIGH);
-
+  //take an image
+  take_image(); 
 }
 
 void loop() {
@@ -116,6 +116,8 @@ void loop() {
 
 
   // test only section:
+
+  write_new_captures();
 
 
 }
@@ -232,25 +234,47 @@ void log() {
 
 // BME pressure sensor reading
 float read_altitude() { // units meters
-  return pressure_sensor.readAltitude(SEALEVELPRESSURE_HPA);
+
+  digitalWrite(Pressure_Sensor_Pin, LOW);
+  float result = pressure_sensor.readAltitude(SEALEVELPRESSURE_HPA);
+  digitalWrite(Pressure_Sensor_Pin, HIGH);
+  
+  return result;
 }
 float read_pressure() { // units hpa
- return pressure_sensor.readPressure() / 100.0F;
+
+  digitalWrite(Pressure_Sensor_Pin, LOW);
+  float result = pressure_sensor.readPressure() / 100.0F;
+  digitalWrite(Pressure_Sensor_Pin, HIGH);
+
+ return result;
 }
 float read_humidity() { // units %
-  return pressure_sensor.readHumidity();
+
+  digitalWrite(Pressure_Sensor_Pin, LOW);
+  float result = pressure_sensor.readHumidity();
+  digitalWrite(Pressure_Sensor_Pin, HIGH);
+
+  return result;
 }
 float read_temperature() { // units °C
-  return pressure_sensor.readTemperature();
+
+  digitalWrite(Pressure_Sensor_Pin, LOW);
+  float result = pressure_sensor.readTemperature();
+  digitalWrite(Pressure_Sensor_Pin, HIGH);
+
+  return result;
 }
 
 // SD card control Functions
 void write_image() {
 
 }
+
 void read_image() {
 
 }
+
 void write_logfile(String message) {
   logfile = SD.open("logfile.txt", FILE_WRITE);
 
@@ -267,8 +291,83 @@ void write_logfile(String message) {
 
 // Camera control functions
 void take_image() {
-  
+  //clear flags
+  myCAM.flush_fifo();
+  myCAM.clear_fifo_flag();
+  //start flags
+  write_logfile("Starting Camera Capture");
+  myCAM.start_capture();
+
 }
+
+void write_new_captures(){
+  if(!myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) return; // camera not done yet
+  File outfile = SD.open("IMAGE.jpg", O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
+  if(!outfile){
+    write_logfile("Failed to crate image file");
+    return;
+  }
+  write_logfile("Image Capture Ready");
+  uint32_t length = myCAM.read_fifo_length(); //read image length
+  myCAM.set_fifo_burst(); //Set fifo burst mode for easy reads
+  uint8_t data;
+  while(length > 0){
+    myCAM.CS_LOW(); // active the camera
+    myCAM.set_fifo_burst(); // has to be reset as far a I know every time
+    data = SPI.transfer(0x00);
+    myCAM.CS_HIGH(); // deactive the camera for sd
+    outfile.write(data);
+    length--;
+  }
+  write_logfile("Finished Image Write");
+  myCAM.clear_fifo_flag();
+  outfile.close();
+  if(!SD.exists("IMAGE.jpg")){
+    write_logfile("Created Image file and wrote to it but it donst exist after writing");
+  }
+}
+
+//initalize camera
+void init_camera(){
+  //reset camera
+  myCAM.write_reg(0x07, 0x80);
+  delay(100);
+  myCAM.write_reg(0x07, 0x00);
+  //check test register
+  while(1){ // just writes to a test port and if it can read it back then it is good
+    //Check if the ArduCAM SPI bus is OK
+    myCAM.write_reg(ARDUCHIP_TEST1, 0x55);
+    uint8_t temp = myCAM.read_reg(ARDUCHIP_TEST1);
+    if (temp != 0x55){
+      write_logfile("Failed to connect to Camera via SPI");
+      delay(10000);
+      continue; // retry untill good connection
+    }else{
+      write_logfile("Succesfully connected to Camera modual via SPI");
+      break;   // good connection continue with the code
+    }
+  }
+  //check the camera type
+  uint8_t vid, pid;
+  while(1){
+    //Check if the camera module type is OV2640
+    myCAM.wrSensorReg8_8(0xff, 0x01);
+    myCAM.rdSensorReg8_8(OV2640_CHIPID_HIGH, &vid);
+    myCAM.rdSensorReg8_8(OV2640_CHIPID_LOW, &pid);
+    if ((vid != 0x26 ) && (( pid != 0x41 ) || ( pid != 0x42 ))){
+      write_logfile("Failed to find the Correct Camera Module");
+      delay(1000);
+      continue;
+    }else{
+      break;
+    }
+  }
+  //setup camera settings
+  myCAM.set_format(JPEG);
+  myCAM.InitCAM();
+  myCAM.OV2640_set_JPEG_size(OV2640_320x240);
+}
+
 
 // Radio control Functions
 void send_transmission() {
