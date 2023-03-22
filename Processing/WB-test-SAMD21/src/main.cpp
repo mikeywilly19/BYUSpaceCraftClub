@@ -279,6 +279,7 @@ void write_logfile(String message) {
   logfile = SD.open("logfile.txt", FILE_WRITE);
 
    if (logfile) {
+    logfile.print(getTime() + " ");
     logfile.println(message);
     logfile.close();
   }
@@ -302,7 +303,7 @@ void take_image() {
 
 void write_new_captures(){
   if(!myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) return; // camera not done yet
-  File outfile = SD.open("IMAGE.jpg", O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
+  File outfile = SD.open(getImageName(), O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
   if(!outfile){
     write_logfile("Failed to crate image file");
     return;
@@ -372,4 +373,22 @@ void init_camera(){
 // Radio control Functions
 void send_transmission() {
 
+}
+
+String getTime(){
+int ts = millis() / 1000;
+int tm = ts / 60;
+int th = tm / 60;
+tm = tm % 60;
+ts = ts % 60;
+String timeStamp = th + ":" + tm; 
+timeStamp +=":" + ts;
+return timeStamp;
+}
+
+String getImageName(){
+ int ts = millis() / 1000;
+ String imageName = String(ts, HEX);
+ imageName += ".jpg";
+ return imageName;
 }
