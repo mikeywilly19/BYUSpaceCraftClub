@@ -56,10 +56,10 @@ void write_logfile(String message);
 void take_image();
 void send_transmission();
 void init_camera();
-String write_new_captures();
+void write_new_captures();
 
 
-// other
+// sensor initializations
 
 Adafruit_BME280 pressure_sensor(Pressure_Sensor_Pin); // Object for pressure sensor
 ArduCAM myCAM( OV2640, Camera_Pin ); // Camera
@@ -72,7 +72,7 @@ File logfile;
  * 
 **********************************************************/
 bool START = false;
-
+int imageIndex = 0;
 
 
 // fsmMain signals 
@@ -136,8 +136,6 @@ void setup() {
 
   pressure_sensor.begin();
 
-  //take an image
-  take_image(); 
 }
 
 void loop() {
@@ -150,7 +148,7 @@ void loop() {
     planning();
     action();
   }
-  log();
+  // log();
   // test only section:
 
 }
@@ -288,7 +286,7 @@ void action() {
     case WRITE_IMAGE:
 
       write_new_captures();
-      
+
       break;
     case READ_IMAGE:
 
@@ -376,13 +374,13 @@ float read_temperature() { // units °C
 }
 
 // SD card control Functions
-String write_new_captures(){
+void write_new_captures(){
   // get the name of the new image
   String name = getImageName();
 
 
   // if(!myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) return; // camera not done yet
-  File outfile = SD.open(getImageName(), O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
+  File outfile = SD.open(name, O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
   if(!outfile){
     write_logfile("Failed to crate image file");
     return;
@@ -402,11 +400,10 @@ String write_new_captures(){
   write_logfile("Finished Image Write");
   myCAM.clear_fifo_flag();
   outfile.close();
-  if(!SD.exists("IMAGE.jpg")){
+  if(!SD.exists(name)){
     write_logfile("Created Image file and wrote to it but it donst exist after writing");
   }
 
-  return name;
 }
 
 void read_image(String name) {
@@ -481,7 +478,7 @@ void init_camera(){
   //setup camera settings
   myCAM.set_format(JPEG);
   myCAM.InitCAM();
-  myCAM.OV2640_set_JPEG_size(OV2640_320x240);
+  myCAM.OV2640_set_JPEG_size(OV2640_1600x1200);
 }
 
 
@@ -502,8 +499,20 @@ return timeStamp;
 }
 
 String getImageName(){
- int ts = millis() / 1000;
- String imageName = String(ts, HEX);
- imageName += ".jpg";
- return imageName;
+  static int nextWrite = 0;
+
+  String imageName = nextWrite + ".jpg";
+  nextWrite++;
+
+  // Write the image name and timestamp to a logfile
+
+  File imageLog = SD.open("ImageLog.txt", O_APPEND);
+  if(!imageLog) {
+    write_logfile("Failed to write to the image log");
+  }
+  String message = "Name - " + imageName + "    Time - " + getTime() + "    Altitude - " + read_altitude();
+  imageLog.println(message);
+  write_logfile(message);
+
+  return imageName;
 }
