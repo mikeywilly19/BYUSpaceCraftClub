@@ -23,6 +23,17 @@
 File myFile;
 
 void setup() {
+
+  pinMode(6, OUTPUT);
+  pinMode(3, OUTPUT);
+  pinMode(2, OUTPUT);
+
+  digitalWrite(6, HIGH);
+  digitalWrite(3, HIGH);
+  digitalWrite(2, HIGH);
+
+
+
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
   while (!Serial) {
@@ -32,7 +43,7 @@ void setup() {
 
   Serial.print("Initializing SD card...");
 
-  if (!SD.begin(1)) {
+  if (!SD.begin(7)) {
     Serial.println("initialization failed!");
     while (1);
   }
