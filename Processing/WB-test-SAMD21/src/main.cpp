@@ -18,6 +18,7 @@
 #include <Adafruit_BME280.h>
 #include <SD.h>
 #include <ArduCAM.h>
+#include <LoRa.h>
 // #include "memorysaver.h"
 
 
@@ -25,7 +26,8 @@
 
 #define SEALEVELPRESSURE_HPA   1013.25           // Pressure at sea level to be used in getting altitude.
 #define CAPTURE_ALTITUDE       0          // Altitude to start capture, units in meters
-#define IMAGE_INTERVAL_TIME    120000           // Time in between image captures   in miliseconds
+#define IMAGE_INTERVAL_TIME    120000           // Time in between image captures in milliseconds
+#define TRANSMIT_INTERVAL_TIME 500              // Time in between transmissions in milliseconds 
 
 // original Altitude reading on setup
 float groundAltitude;
@@ -38,6 +40,8 @@ float groundAltitude;
 #define SD_Card_Pin           7
 #define Camera_Pin            2
 #define Radio_Pin             6
+#define Radio_Reset           1
+#define Radio_DID0            0
 
 // // HardWare pins on SAMD21
 // #define SDA   4
@@ -58,11 +62,12 @@ float read_pressure();
 void read_image(String name);
 void write_logfile(String message);
 void take_image();
-void send_transmission();
+void ping();
 void init_camera();
 void write_new_captures();
 void fsmMain();
 bool imageTrigger();
+bool TransmissionTrigger();
 String getImageName();
 String getTime();
 
@@ -83,6 +88,7 @@ File imageLog;
 bool START = false;
 int imageIndex = 0;
 unsigned long lastCaptureTime = 0;
+unsigned long lastTransmitTime = 0;
 
 
 // fsmMain signals 
@@ -96,13 +102,13 @@ unsigned long lastCaptureTime = 0;
 
 
 // Input Signals to control state Machine states
-int AltitudeReached   = 0;
+int AltitudeReached   = 1;
 int CaptureDone       = 0;
 int WriteDone         = 0;
-int Transmit          = 0;
+// int Transmit          = 0;
 int ReadDone          = 0;
 int TransmissionSent  = 0;
-bool CaptureImage      = true;
+// bool CaptureImage      = true;
 
 // Output Signals to control robot actions
 int ACTION            = 0;
@@ -151,6 +157,16 @@ void setup() {
   groundAltitude = read_altitude();
 
 
+
+  // Radio setup
+  LoRa.setPins(Radio_Pin, Radio_Reset, Radio_DID0);
+
+  if(!LoRa.begin(433E6)) {
+    Serial.println("Starting LoRa failed!");
+    while(1);
+  }
+
+
   // pinMode(0, INPUT);
   Serial.println("Setup Complete");
 
@@ -167,11 +183,11 @@ void loop() {
   //      Also included a log function for logging events, 
   //      could be done interspersed through the program instead
 
-  perception();
-  if(START) {
+  //perception();
+  
     planning();
     action();
-  }
+  
   // log();
   // test only section:
   // delay(1000);
@@ -223,7 +239,7 @@ void planning() {
 }
 
 void fsmMain() {
-  static int mainState = IDLE;
+  static int mainState = HUB;
   // Serial.println(mainState);
 
   switch(mainState) {
@@ -241,13 +257,10 @@ void fsmMain() {
       ACTION = WAIT_IMAGE;
 
       // State Transition Logic
-      if (!AltitudeReached) {
-        write_logfile("Target Altitude reched - below target");
-        mainState = IDLE;
-      } else if(imageTrigger()) {
+      if(imageTrigger()) {
         mainState = IMAGE;
-      } else if (Transmit) {
-        mainState = READ;
+      } else if (TransmissionTrigger()) {
+        mainState = TRANSMIT;
       }
       break;
 
@@ -295,10 +308,6 @@ bool isCameraDone(){
 }
 
 bool imageTrigger() {
-  if(CaptureImage) {
-    CaptureImage = false;
-    return true;
-  }
 
   if(millis() - lastCaptureTime > IMAGE_INTERVAL_TIME) {
     return true;
@@ -308,6 +317,18 @@ bool imageTrigger() {
   }
   
 }
+
+bool TransmissionTrigger() {
+
+  if(millis() - lastTransmitTime > TRANSMIT_INTERVAL_TIME) {
+    return true;
+  }
+  else {
+    return false;
+  }
+  
+}
+
 
 
 /*
@@ -343,7 +364,8 @@ void action() {
       break;
     case TRANSMIT_IMAGE:
 
-      // FIXME:: add functions to transmit the image over radio module
+      ping();
+      lastTransmitTime = millis();
 
       break;
   }
@@ -508,8 +530,19 @@ void init_camera(){
 
 
 // Radio control Functions
-void send_transmission() {
+void ping() {
+  static int Rad_Count = 0;
 
+  Serial.print("Sending packet: ");
+  Serial.println(Rad_Count);
+
+  // Send packet
+  LoRa.beginPacket();
+  LoRa.print("helloasdfasdfasdf ");
+  LoRa.print(Rad_Count);
+  LoRa.endPacket();
+
+  Rad_Count++;
 }
 
 String getTime(){
