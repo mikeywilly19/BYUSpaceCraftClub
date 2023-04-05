@@ -24,15 +24,20 @@
 // Global constants
 
 #define SEALEVELPRESSURE_HPA   1013.25           // Pressure at sea level to be used in getting altitude.
-#define CAPTURE_ALTITUDE       1290.5           // Altitude to start capture, units in meters
+#define CAPTURE_ALTITUDE       0          // Altitude to start capture, units in meters
+#define IMAGE_INTERVAL_TIME    120000           // Time in between image captures   in miliseconds
+
+// original Altitude reading on setup
+float groundAltitude;
 
 
 
 // Pin Naming
 
-#define Pressure_Sensor_Pin   2
-#define SD_Card_Pin           1
-#define Camera_Pin            3
+#define Pressure_Sensor_Pin   3
+#define SD_Card_Pin           7
+#define Camera_Pin            2
+#define Radio_Pin             6
 
 // // HardWare pins on SAMD21
 // #define SDA   4
@@ -46,25 +51,66 @@ void perception();
 bool reachedAltitude();
 void planning();
 void action();
-void log();
 float read_altitude();
 float read_pressure();
 float read_humidity();
 float read_pressure();
-void write_image();
-void read_image();
+void read_image(String name);
 void write_logfile(String message);
 void take_image();
 void send_transmission();
 void init_camera();
 void write_new_captures();
+void fsmMain();
+bool imageTrigger();
+String getImageName();
+String getTime();
 
 
-// other
+// sensor initializations
 
 Adafruit_BME280 pressure_sensor(Pressure_Sensor_Pin); // Object for pressure sensor
 ArduCAM myCAM( OV2640, Camera_Pin ); // Camera
 File logfile;
+File imageLog;
+
+/*********************************************************
+ * 
+ * Global Flags for use in state machines and Actions
+ * 
+ * 
+**********************************************************/
+bool START = false;
+int imageIndex = 0;
+unsigned long lastCaptureTime = 0;
+
+
+// fsmMain signals 
+// State Machine States
+#define IDLE      0
+#define HUB       1
+#define IMAGE     2
+#define WRITE     3
+#define READ      4
+#define TRANSMIT  5
+
+
+// Input Signals to control state Machine states
+int AltitudeReached   = 0;
+int CaptureDone       = 0;
+int WriteDone         = 0;
+int Transmit          = 0;
+int ReadDone          = 0;
+int TransmissionSent  = 0;
+bool CaptureImage      = true;
+
+// Output Signals to control robot actions
+int ACTION            = 0;
+#define WAIT_IMAGE      0
+#define TAKE_IMAGE      1 
+#define WRITE_IMAGE     2 
+#define READ_IMAGE      3
+#define TRANSMIT_IMAGE  4 
 
 
 void setup() {
@@ -76,32 +122,44 @@ void setup() {
   SPI.begin();
 
 
-  // SD card setup
+  // CS pin setup
   pinMode(SD_Card_Pin, OUTPUT); // setup the camera chip select
   digitalWrite(SD_Card_Pin, HIGH); // disable camera
 
+  pinMode(Camera_Pin, OUTPUT); // setup the camera chip select
+  digitalWrite(Camera_Pin, HIGH); // disable camera
+
+  pinMode(Pressure_Sensor_Pin, OUTPUT); // setup the BME chip select
+  digitalWrite(Pressure_Sensor_Pin, HIGH);  // disable pressure sensor
+
+  pinMode(Radio_Pin, OUTPUT);
+  digitalWrite(Radio_Pin, HIGH);
+
+
+  // SD card setup
   if(!SD.begin(SD_Card_Pin)){
-    Serial.println("Failed to Initalize SD Card");
+    // Serial.println("Failed to Initalize SD Card");
   }
 
 
   // Camera Setup
-  pinMode(Camera_Pin, OUTPUT); // setup the camera chip select
-  digitalWrite(Camera_Pin, HIGH); // disable camera
-
-  Wire.begin();
-  SPI.begin();
-
   init_camera();
 
+
   // Pressure sensor setup
-  pinMode(Pressure_Sensor_Pin, OUTPUT); // setup the BME chip select
-  digitalWrite(Camera_Pin, HIGH);  // disable pressure sensor
-
   pressure_sensor.begin();
+  groundAltitude = read_altitude();
 
-  //take an image
-  take_image(); 
+
+  // pinMode(0, INPUT);
+  Serial.println("Setup Complete");
+
+
+  // Logfile opening
+  write_logfile("-----BEGIN LOGFILE-----");
+  write_logfile("Ground Altitude read: " + String(groundAltitude) + " meters");
+  write_logfile("Target Altitude: " + String(CAPTURE_ALTITUDE) + " meters");
+
 }
 
 void loop() {
@@ -110,15 +168,13 @@ void loop() {
   //      could be done interspersed through the program instead
 
   perception();
-  planning();
-  action();
-  log();
-
-
+  if(START) {
+    planning();
+    action();
+  }
+  // log();
   // test only section:
-
-  write_new_captures();
-
+  // delay(1000);
 
 }
 
@@ -131,18 +187,21 @@ void loop() {
   * Sensors:
   * atmospheric sensor
   * 
+  * 5 * (float)analogRead(0) / 1024 > 4.5
 */
 void perception() {
-  if(reachedAltitude()) {
-    write_logfile("Altitude reached");
+  if( reachedAltitude()) {
+    AltitudeReached = 1;
+    START = true;
   } else {
-    write_logfile("Altitude not reached");
+    START = false;
+    AltitudeReached = 0;
   }
 }
 
 
 bool reachedAltitude() {
-  if (read_altitude() > CAPTURE_ALTITUDE) {
+  if ((read_altitude() - groundAltitude) > CAPTURE_ALTITUDE) {
     return true;
   } else {
     return false;
@@ -159,17 +218,96 @@ bool reachedAltitude() {
   * 
 */
 void planning() {
-  write_logfile("Current Altitude = ");
+  fsmMain();
+  
+}
+
+void fsmMain() {
+  static int mainState = IDLE;
+  // Serial.println(mainState);
+
+  switch(mainState) {
+    case IDLE:
+      ACTION = WAIT_IMAGE;
+      
+      // State Transition logic
+      if(AltitudeReached) {
+        write_logfile("Target Altitude reached - Above target");
+        mainState = HUB;
+      }
+      break;
+    
+    case HUB:
+      ACTION = WAIT_IMAGE;
+
+      // State Transition Logic
+      if (!AltitudeReached) {
+        write_logfile("Target Altitude reched - below target");
+        mainState = IDLE;
+      } else if(imageTrigger()) {
+        mainState = IMAGE;
+      } else if (Transmit) {
+        mainState = READ;
+      }
+      break;
+
+    case IMAGE:
+      ACTION = TAKE_IMAGE;
+  
+
+      // State Transition Logic
+      mainState = WRITE;
+      break;
+
+    case WRITE:
+      ACTION = WRITE_IMAGE;
+
+      // State Transition Logic
+      mainState = HUB;
+      break;
+
+    case READ:
+      ACTION = READ_IMAGE;
+
+      // State Transition Logic
+      if(ReadDone) {
+        mainState = TRANSMIT;
+      }
+      break;
+
+    case TRANSMIT:
+      ACTION = TRANSMIT_IMAGE;
+
+      // State Transition Logic
+      if(TransmissionSent) {
+        mainState = HUB;
+      }
+      break;
+  }
 }
 
 
-// Add state machine to determine when to take a picture and activate camera
+bool isCameraDone(){
+  if(myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) 
+    return true;
+  else 
+    return false;
+}
 
-// Add state machine to manage the sending of data to SD card
+bool imageTrigger() {
+  if(CaptureImage) {
+    CaptureImage = false;
+    return true;
+  }
 
-// Add state machine to manage the sending of data from SD card to radio and activate radio
-
-
+  if(millis() - lastCaptureTime > IMAGE_INTERVAL_TIME) {
+    return true;
+  }
+  else {
+    return false;
+  }
+  
+}
 
 
 /*
@@ -178,49 +316,45 @@ void planning() {
 * 
 * Functions:
 * 
-* 
 */
 void action() {
-  float alt = read_altitude();
-  write_logfile(String(alt));
+  switch(ACTION) {
+    case WAIT_IMAGE:
+      // For now, do nothing
+    break;
+    case TAKE_IMAGE:
+
+
+      take_image();
+      lastCaptureTime = millis();
+      while(!isCameraDone());
+      
+
+      break;
+    case WRITE_IMAGE:
+
+      write_new_captures();
+
+      break;
+    case READ_IMAGE:
+
+      // FIXME:: add functions to read the image needed
+
+      break;
+    case TRANSMIT_IMAGE:
+
+      // FIXME:: add functions to transmit the image over radio module
+
+      break;
+  }
+  
 }
-
-// add fucntion to run camera capture
-
-// add function to write to SD card
-
-// add function to read from SD card
-
-// add function to activate and send data over radio
-
 
 
 
 /*
+ * 
  * SECTION 4 
- * logging
- * 
- * determine what to log, and how to write log file so we can read post mission
- * 
-*/
-void log() {
-  delay(2000);
-
-}
-
-
-
-
-
-
-
-
-
-
-
-/*
- * 
- * SECTION 5
  * Functions for other use
  * 
  * Subsections:
@@ -267,11 +401,39 @@ float read_temperature() { // units °C
 }
 
 // SD card control Functions
-void write_image() {
+void write_new_captures(){
+  // get the name of the new image
+  String name = getImageName();
+
+
+  // if(!myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) return; // camera not done yet
+  File outfile = SD.open(name, O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
+  if(!outfile){
+    write_logfile("Failed to create image file");
+    return;
+  }
+  write_logfile("Image Capture Ready");
+  uint32_t length = myCAM.read_fifo_length(); //read image length
+  myCAM.set_fifo_burst(); //Set fifo burst mode for easy reads
+  uint8_t data;
+  while(length > 0){
+    myCAM.CS_LOW(); // active the camera
+    myCAM.set_fifo_burst(); // has to be reset as far a I know every time
+    data = SPI.transfer(0x00);
+    myCAM.CS_HIGH(); // deactive the camera for sd
+    outfile.write(data);
+    length--;
+  }
+  write_logfile("Finished Image Write");
+  myCAM.clear_fifo_flag();
+  outfile.close();
+  if(!SD.exists(name)){
+    write_logfile("Created Image file and wrote to it but it doesn't exist after writing");
+  }
 
 }
 
-void read_image() {
+void read_image(String name) {
 
 }
 
@@ -301,32 +463,7 @@ void take_image() {
 
 }
 
-void write_new_captures(){
-  if(!myCAM.get_bit(ARDUCHIP_TRIG, CAP_DONE_MASK)) return; // camera not done yet
-  File outfile = SD.open(getImageName(), O_WRITE | O_CREAT); // the arduino sd library is limited to file names of 8 characters wide by 3 wide in extention
-  if(!outfile){
-    write_logfile("Failed to crate image file");
-    return;
-  }
-  write_logfile("Image Capture Ready");
-  uint32_t length = myCAM.read_fifo_length(); //read image length
-  myCAM.set_fifo_burst(); //Set fifo burst mode for easy reads
-  uint8_t data;
-  while(length > 0){
-    myCAM.CS_LOW(); // active the camera
-    myCAM.set_fifo_burst(); // has to be reset as far a I know every time
-    data = SPI.transfer(0x00);
-    myCAM.CS_HIGH(); // deactive the camera for sd
-    outfile.write(data);
-    length--;
-  }
-  write_logfile("Finished Image Write");
-  myCAM.clear_fifo_flag();
-  outfile.close();
-  if(!SD.exists("IMAGE.jpg")){
-    write_logfile("Created Image file and wrote to it but it donst exist after writing");
-  }
-}
+
 
 //initalize camera
 void init_camera(){
@@ -344,7 +481,7 @@ void init_camera(){
       delay(10000);
       continue; // retry untill good connection
     }else{
-      write_logfile("Succesfully connected to Camera modual via SPI");
+      write_logfile("Succesfully connected to Camera module via SPI");
       break;   // good connection continue with the code
     }
   }
@@ -366,7 +503,7 @@ void init_camera(){
   //setup camera settings
   myCAM.set_format(JPEG);
   myCAM.InitCAM();
-  myCAM.OV2640_set_JPEG_size(OV2640_320x240);
+  myCAM.OV2640_set_JPEG_size(OV2640_1600x1200);
 }
 
 
@@ -381,14 +518,31 @@ int tm = ts / 60;
 int th = tm / 60;
 tm = tm % 60;
 ts = ts % 60;
-String timeStamp = th + ":" + tm; 
-timeStamp +=":" + ts;
+String timeStamp = String(th) + ":" + String(tm); 
+timeStamp +=":" + String(ts);
 return timeStamp;
 }
 
 String getImageName(){
- int ts = millis() / 1000;
- String imageName = String(ts, HEX);
- imageName += ".jpg";
- return imageName;
+  static int nextWrite = 0;
+
+  String name = String(nextWrite);
+
+  String imageName = name + ".jpg";
+  nextWrite++;
+
+
+  // Write the image name and timestamp to a logfile
+  String message = "Name - " + imageName + "    Time - " + getTime() + "    Altitude - " + read_altitude();
+
+  imageLog = SD.open("ImgLog.txt", FILE_WRITE);
+  if(imageLog) {
+    imageLog.println(message);
+    imageLog.close();
+  } else {
+    write_logfile("Failed to write to the image log");
+  }
+  write_logfile(message);
+
+  return imageName;
 }
