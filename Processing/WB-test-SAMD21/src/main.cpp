@@ -159,12 +159,14 @@ void setup() {
 
 
   // Radio setup
+  digitalWrite(Radio_Pin, LOW);
   LoRa.setPins(Radio_Pin, Radio_Reset, Radio_DID0);
 
   if(!LoRa.begin(433E6)) {
     Serial.println("Starting LoRa failed!");
     while(1);
   }
+  digitalWrite(Radio_Pin, HIGH);
 
 
   // pinMode(0, INPUT);
