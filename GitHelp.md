@@ -21,7 +21,8 @@ These steps create an ssh key.  Now you have to upload it to github.  To see you
 
 Copy everything that command outputs.  In github, go to you setings (click on your profile in the upper right corner) > SSH and GPG keys > new ssh key.  Here you can paste in what you copied along with a title (doesn't matter).
 
-![](images/github_sshkeys.png)
+![image](https://github.com/mikeywilly19/BYUSpaceCraftClub/assets/99697494/8657b979-8aba-4880-8e45-1c5208f6be46)
+
 
 Now you should be authenticated with github.  Now go to the project page for pocket cube.  There is a green button that says `code`.  Click on that and copy the ssh address.
 
