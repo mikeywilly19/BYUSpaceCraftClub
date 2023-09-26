@@ -26,7 +26,8 @@ Copy everything that command outputs.  In github, go to you setings (click on yo
 
 Now you should be authenticated with github.  Now go to the project page for pocket cube.  There is a green button that says `code`.  Click on that and copy the ssh address.
 
-![](images/github_sshaddress.png)
+![image](https://github.com/mikeywilly19/BYUSpaceCraftClub/assets/99697494/61a3f612-fd91-4510-8bab-caba1159d47b)
+
 
 Navigate to were you want to put the project directory and use the command `git clone` and the address you just copied.  This should clone the repository to your computer.
 
