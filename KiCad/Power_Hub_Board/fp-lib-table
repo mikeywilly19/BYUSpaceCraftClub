@@ -1,0 +1,4 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "Power_Footprints_Library")(type "KiCad")(uri "C:/Users/mikey/GitRepo/BYUSpaceCraftClub/KiCad/Power_Footprints_Library.pretty")(options "")(descr ""))
+)
